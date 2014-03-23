@@ -10,13 +10,14 @@ AddCSLuaFile( SMPA.."/ui.lua" )
 if CLIENT then
 	language.Add( "Tool."..SMPA..".name", "Smart Painter" )
 	language.Add( "Tool."..SMPA..".desc", "Easy color/material switcher for whole contraption" )
-	language.Add( "Tool."..SMPA..".0", "Left - select/deselct prop, Left + E - select whole contraption, Left + Shift - select entities in range, Right - Select prop scheme, Shift - preview, R - deselect all" )
+	language.Add( "Tool."..SMPA..".0", "Left - select/deselct prop, Left + E - select whole contraption, Left + Shift - select entities in range, Right - Select prop scheme, R - deselect all" )
 end
 
 if SERVER then
 	util.AddNetworkString( "SCHEMES_clear" )
 	util.AddNetworkString( "SCHEMES_update" )
 	util.AddNetworkString( "SCHEMES_paint" )
+	util.AddNetworkString( "SCHEMES_highlight" )
 end
 
 TOOL.ClientConVar =
@@ -142,11 +143,11 @@ function TOOL:SelectEnt( ent )
 	Prop.index = Index
 	table.insert( self.SelectedProps, Prop )
 	local Selected = self:GetClientNumber("index")
-	if Selected and Selected == Index then
+	/*if Selected and Selected == Index then
 		ent:SetColor(self.SelectionColor2)
 	else
 		ent:SetColor(self.SelectionColor)
-	end	
+	end*/	
 	ent:SetRenderMode(RENDERMODE_TRANSALPHA)
 end
 
@@ -214,9 +215,9 @@ local function AddChildren( Children )
 	local Table = {}
 	for _, v in pairs( Children ) do
 		if IsValid(v) and v != NULL then
-		
-			Table[v:EntIndex()] = v
-			
+			if not string.find( v:GetClass(), "gmod_" ) then
+				Table[v:EntIndex()] = v
+			end
 			if v:GetChildren() != {} then
 				table.Merge(Table, AddChildren( v:GetChildren() ))
 			end
@@ -241,9 +242,9 @@ local function FormatTable( ent )
 		
 	for k,_ in pairs( Entities ) do
 		if IsValid(k) and k ~= NULL then
-		
-			Table[k:EntIndex()] = k
-
+			if not string.find( k:GetClass(), "gmod_" ) then
+				Table[k:EntIndex()] = k
+			end
 			if k:GetChildren() != {} then
 				table.Merge(Table, AddChildren( k:GetChildren() ))
 			end
@@ -270,7 +271,6 @@ local function IsForSureValid( ent )
 		"predicted_viewmodel",
 		"keyframe_rope",
 		"phys_spring",
-		"gmod_wire_hologram",
 		"phys_ragdollconstraint",
 		"phys_lengthconstraint"
 	}
@@ -296,13 +296,13 @@ local function FindInSphere(Pos, max, ply)
 			end
 		end
 		
-		local tbl = {}
+		/*local tbl = {}
 		for k,v in pairs( EntTable ) do
 			if IsValid(v) and not table.HasValue( tbl, v:GetClass() ) then 
 				print(v:GetClass()) 
 				table.insert( tbl, v:GetClass() )
 			end
-		end
+		end*/
 
 		return EntTable
 end
@@ -325,7 +325,6 @@ function TOOL:LeftClick( trace )
 					end
 			end
 		end
-		return true
 	elseif ply:KeyDown(IN_SPEED) then	
 		local AreaSize = self:GetClientNumber("selection_size")
 		if not AreaSize or AreaSize<50 then AreaSize = 50 end
@@ -339,13 +338,23 @@ function TOOL:LeftClick( trace )
 					end
 			end
 		end
-		return true
 	elseif self:IsSelected( trent ) then
 		self:DeselectEnt( trent )
-		return true
 	else
 		self:SelectEnt( trent )
-		return true
+	end
+	
+	if self.SelectedProps then
+		local tbl = {}
+		for _,v in pairs( self.SelectedProps ) do
+			if v.ent and IsValid(v.ent) then
+				if not tbl[v.index] then tbl[v.index] = {} end
+				table.insert( tbl[v.index], v.ent:EntIndex() )
+			end
+		end
+		net.Start("SCHEMES_highlight")
+			net.WriteTable(tbl)
+		net.Send(self:GetOwner())
 	end
 	
 	return true;
@@ -369,11 +378,15 @@ function TOOL:Reload()
 	self:DeselectAll()
 end
 
+function TOOL:Holster()
+	self:DeselectAll()
+end
+
 function TOOL:Think()
 	if not self.SelectedProps or not self.SCHEMES or self.SelectedProps == {} or self.SCHEMES == {} then return end
 	local Index = self:GetClientNumber("index")
 	if Index != self.LastIndex then
-		self.LastIndex = Index
+		/*self.LastIndex = Index
 		for k, v in pairs( self.SelectedProps ) do
 			if IsValid(v.ent) and v.ent != NULL then
 				if not Index or Index != v.index then 
@@ -382,11 +395,11 @@ function TOOL:Think()
 					v.ent:SetColor( self.SelectionColor2 )
 				end
 			end
-		end
+		end*/
 	end
 	
-	if self:GetOwner():KeyDown(IN_SPEED) then
-		self.Shift = true
+	--if self:GetOwner():KeyDown(IN_SPEED) then
+		--self.Shift = true
 		local NewColor = Color(self:GetClientNumber("colr"), self:GetClientNumber("colg"), self:GetClientNumber("colb"), self:GetClientNumber("cola"))
 		if NewColor != self.LastColor then
 			self.LastColor = NewColor
@@ -398,7 +411,7 @@ function TOOL:Think()
 				end
 			end
 		end
-	elseif not self:GetOwner():KeyDown(IN_SPEED) and self.Shift then
+	/*elseif not self:GetOwner():KeyDown(IN_SPEED) and self.Shift then
 		self.Shift = false
 		if table.Count( self.SelectedProps ) > 0 then
 			for k, v in pairs( self.SelectedProps ) do
@@ -410,8 +423,8 @@ function TOOL:Think()
 					end
 				end
 			end
-		end
-	end
+		end*/
+	--end
 end
 
 if CLIENT then
@@ -422,13 +435,28 @@ if CLIENT then
 		table.remove(SCHEMES, index)
 	end
 	
-	net.Receive( "SCHEMES_update", function( len )
+	net.Receive( "SCHEMES_update", function()
 		local index = net.ReadFloat()
 		SCHEMES[index] = net.ReadTable()
 	end )
 	
-	net.Receive( "SCHEMES_clear", function( len )
+	net.Receive( "SCHEMES_clear", function()
 		SCHEMES = net.ReadTable()
+		if SP_Highlight then SP_Highlight = nil end
+	end )
+	
+	net.Receive( "SCHEMES_highlight", function()
+		local tbl = net.ReadTable()
+		local tbl2 = {}
+		for k,v in pairs( tbl ) do
+			local tbl3 = {}
+			for _,v2 in pairs( v ) do
+				if IsValid( Entity(v2) ) then table.insert( tbl3, Entity(v2) ) end
+			end
+			tbl2[k] = tbl3
+		end
+		--for _,v in pairs( tbl2 ) do PrintTable( v ) end
+		SP_Highlight = tbl2
 	end )
 	
 	usermessage.Hook( "SCHEMES_updateindex", function( data)
@@ -513,6 +541,18 @@ if CLIENT then
 			DrawScrollingText( MatString, 128, 256 )
 		cam.End2D()
 	end
+	
+	hook.Add( "PreDrawHalos", "SMARTPAINTER_Halos", function()
+		if not SP_Highlight then return end
+		local Index = GetConVar(SMPA.."_index"):GetFloat()
+		for k,v in pairs( SP_Highlight ) do
+			if k == Index then
+				halo.Add( v, Color(255,255,200), 2, 2, 2, true, true )
+			else
+				halo.Add( v, Color(255,255,255), 2, 2, 1, true, false )
+			end
+		end
+	end)
 end
 
 if SERVER then
