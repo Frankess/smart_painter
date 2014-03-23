@@ -210,6 +210,49 @@ function TOOL:DeselectAll()
 	end
 end
 
+local function AddChildren( Children )
+	local Table = {}
+	for _, v in pairs( Children ) do
+		if IsValid(v) and v != NULL then
+		
+			Table[v:EntIndex()] = v
+			
+			if v:GetChildren() != {} then
+				table.Merge(Table, AddChildren( v:GetChildren() ))
+			end
+		end
+	end
+	return Table
+end
+
+local function FormatTable( ent )
+	if not IsValid( ent ) then return end
+	local Entities = constraint.GetAllConstrainedEntities( ent ) or {}
+	local Table, ent2, rounds = {}, ent, 0
+	
+	Entities[ ent ] = {}
+	
+	while ent2:GetParent() ~= NULL do
+		ent2 = ent2:GetParent()
+		Entities = constraint.GetAllConstrainedEntities( ent2 )
+		rounds = rounds + 1
+		if rounds > 9 then return end
+	end
+		
+	for k,_ in pairs( Entities ) do
+		if IsValid(k) and k ~= NULL then
+		
+			Table[k:EntIndex()] = k
+
+			if k:GetChildren() != {} then
+				table.Merge(Table, AddChildren( k:GetChildren() ))
+			end
+		end
+	end
+		
+	return Table
+end
+
 function TOOL:IsSelected( ent )
 	if table.Count( self.SelectedProps ) > 0 then
 		for k, v in pairs( self.SelectedProps ) do
@@ -221,13 +264,28 @@ function TOOL:IsSelected( ent )
 	return false
 end
 
+local function IsForSureValid( ent )
+	local EXCLUDE = {
+		"info_player_start",
+		"predicted_viewmodel",
+		"keyframe_rope",
+		"phys_spring",
+		"gmod_wire_hologram",
+		"phys_ragdollconstraint",
+		"phys_lengthconstraint"
+	}
+	if table.HasValue( EXCLUDE, ent:GetClass() ) or string.find( ent:GetClass(), "gmod_" ) or string.find( ent:GetClass(), "weapon_" ) then return false end
+	return true
+end
+
 local function FindInSphere(Pos, max, ply)
+		
 
 		local Entities = ents.GetAll()
 		local EntTable = {}
 		for _,ent in pairs(Entities) do
 			local pos = ent:GetPos()
-			if IsValid(ent) and ent != NULL and and not ent:IsWeapon() not ent:IsPlayer() and pos:Distance(Pos) <= max then
+			if IsValid(ent) and ent != NULL and IsForSureValid( ent ) and pos:Distance(Pos) <= max then
 				if CPPI then
 					if ent:CPPICanTool( ply, SMPA ) then
 							EntTable[ent:EntIndex()] = ent
@@ -235,6 +293,14 @@ local function FindInSphere(Pos, max, ply)
 				elseif ent:GetOwner() == ply or  ent:GetOwner() == ply:GetName() then
 					EntTable[ent:EntIndex()] = ent
 				end
+			end
+		end
+		
+		local tbl = {}
+		for k,v in pairs( EntTable ) do
+			if IsValid(v) and not table.HasValue( tbl, v:GetClass() ) then 
+				print(v:GetClass()) 
+				table.insert( tbl, v:GetClass() )
 			end
 		end
 
@@ -249,9 +315,9 @@ function TOOL:LeftClick( trace )
 	local ply = self:GetOwner()
 	
 	if ply:KeyDown(IN_USE) then
-		local Entities = constraint.GetAllConstrainedEntities(trent)
-		for ent , v in pairs( Entities ) do -- Select all and auto detect color schemes
-			if IsValid(ent) and ent != NULL and not self:IsSelected( ent ) then
+		local Entities = FormatTable( trent )
+		for _ , ent in pairs( Entities ) do -- Select all and auto detect color schemes
+			if not self:IsSelected( ent ) then
 					if self:GetClientNumber("onlyprops") == 1 and ent:GetClass() == "prop_physics" then
 						self:SelectEnt( ent )
 					elseif self:GetClientNumber("onlyprops") == 0 then
